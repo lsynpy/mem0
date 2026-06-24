@@ -59,7 +59,7 @@ SKIPPED_REQUEST_LOG_PATHS = {"/api/health", "/docs", "/redoc", "/openapi.json"}
 SKIPPED_REQUEST_LOG_PREFIXES = ("/requests",)
 
 BUNDLED_LLM_PROVIDERS = ("openai", "anthropic", "gemini")
-BUNDLED_EMBEDDER_PROVIDERS = ("openai", "gemini")
+BUNDLED_EMBEDDER_PROVIDERS = ("openai", "gemini", "ollama")
 
 
 def _warn_if_unconfigured() -> None:
@@ -366,6 +366,12 @@ def add_memory(memory_create: MemoryCreate, _auth=Depends(verify_auth)):
     if not any([memory_create.user_id, memory_create.agent_id, memory_create.run_id]):
         raise HTTPException(status_code=400, detail="At least one identifier (user_id, agent_id, run_id) is required.")
 
+    # If agent_id is not explicitly set, default it to user_id so Dashboard
+    # shows a meaningful agent name instead of null. Both Hermes and OpenClaw
+    # benefit from this fallback.
+    if memory_create.agent_id is None and memory_create.user_id is not None:
+        memory_create.agent_id = memory_create.user_id
+
     params = {k: v for k, v in memory_create.model_dump().items() if v is not None and k != "messages"}
     try:
         response = get_memory_instance().add(messages=[m.model_dump() for m in memory_create.messages], **params)
@@ -400,6 +406,8 @@ def _serialize_memory(row: Any) -> Dict[str, Any]:
 def _list_all_memories(limit: int = ALL_MEMORIES_LIMIT) -> Dict[str, Any]:
     results = get_memory_instance().vector_store.list(top_k=limit)
     rows = results[0] if results and isinstance(results, list) and isinstance(results[0], list) else results or []
+    # Sort: newest first by created_at (PostgreSQL returns insertion order without ORDER BY)
+    rows.sort(key=lambda r: (r.payload or {}).get("created_at", "") or "", reverse=True)
     return {"results": [_serialize_memory(row) for row in rows]}
 
 
@@ -421,7 +429,11 @@ def get_all_memories(
         filters = {
             k: v for k, v in {"user_id": user_id, "run_id": run_id, "agent_id": agent_id}.items() if v is not None
         }
-        return get_memory_instance().get_all(filters=filters)
+        result = get_memory_instance().get_all(filters=filters)
+        # Sort newest first (same as _list_all_memories)
+        if "results" in result and isinstance(result["results"], list):
+            result["results"].sort(key=lambda m: m.get("created_at", "") or "", reverse=True)
+        return result
     except HTTPException:
         raise
     except Exception:

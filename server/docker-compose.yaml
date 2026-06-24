@@ -4,7 +4,8 @@ services:
   mem0:
     build:
       context: ..
-      dockerfile: server/dev.Dockerfile
+      dockerfile: server/china.Dockerfile
+    restart: unless-stopped
     ports:
       - "8888:8000"
     env_file:
@@ -13,12 +14,11 @@ services:
       - mem0_network
     volumes:
       - ./history:/app/history
-      - .:/app
     depends_on:
       postgres:
         condition: service_healthy
     command: >
-      sh -c "rm -rf /app/packages && pip install -q --force-reinstall --no-deps mem0ai && alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
     environment:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
@@ -30,7 +30,7 @@ services:
       - MEM0_TELEMETRY=${MEM0_TELEMETRY:-true}
 
   postgres:
-      image: pgvector/pgvector:pg17
+      image: docker.m.daocloud.io/pgvector/pgvector:pg17
       restart: on-failure
       shm_size: "128mb"
       networks:
@@ -51,6 +51,7 @@ services:
 
   mem0-dashboard:
     build: ./dashboard
+    restart: unless-stopped
     ports:
       - "3000:3000"
     networks:
@@ -68,8 +69,21 @@ services:
       timeout: 5s
       retries: 3
 
+  ollama:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    networks:
+      - mem0_network
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    restart: unless-stopped
+
 volumes:
   postgres_db:
+  ollama_data:
 
 networks:
   mem0_network:

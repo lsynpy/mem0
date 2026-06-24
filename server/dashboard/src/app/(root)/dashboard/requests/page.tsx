@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { format, formatDistanceToNow } from "date-fns";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,6 @@ type RequestLog = {
   authType: string;
 };
 
-const REQUEST_LOG_LIMIT = 200;
 const PAGE_SIZE = 20;
 
 const getStatusClassName = (statusCode: number) => {
@@ -82,36 +81,46 @@ const normalizeLog = (entry: ApiRequestLog): RequestLog => {
 
 export default function RequestsPage() {
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
   const {
-    data: logs = [],
+    data: pageLogs = [],
     isLoading,
     error,
     refetch,
   } = useApiQuery<RequestLog[]>(
     async () => {
-      const res = await api.get<ApiRequestLog[]>(REQUEST_ENDPOINTS.BASE, {
-        params: { limit: REQUEST_LOG_LIMIT },
-      });
+      const res = await api.get<{ results: ApiRequestLog[]; total: number }>(
+        REQUEST_ENDPOINTS.BASE,
+        { params: { page, per_page: PAGE_SIZE } },
+      );
       setLastUpdated(new Date().toISOString());
-      return (res.data ?? []).map(normalizeLog);
+      setTotal(res.data.total);
+      return (res.data.results ?? []).map(normalizeLog);
     },
-    { errorToast: "Failed to load request logs", initialData: [] },
+    { enabled: false, errorToast: "Failed to load request logs", initialData: [] },
   );
 
-  const totalRequests = logs.length;
-  const successfulRequests = logs.filter((log) => log.statusCode < 400).length;
+  // Fetch on mount and when page changes
+  useEffect(() => {
+    void refetch();
+  }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const totalRequests = total;
+  const successfulRequests = pageLogs.filter((log) => log.statusCode < 400).length;
   const successRate =
-    totalRequests > 0
-      ? Math.round((successfulRequests / totalRequests) * 100)
+    pageLogs.length > 0
+      ? Math.round((successfulRequests / pageLogs.length) * 100)
       : 0;
   const averageLatency =
-    totalRequests > 0
+    pageLogs.length > 0
       ? Math.round(
-          logs.reduce((sum, log) => sum + log.latencyMs, 0) / totalRequests,
+          pageLogs.reduce((sum, log) => sum + log.latencyMs, 0) / pageLogs.length,
         )
       : 0;
+
+  const totalPages = Math.ceil(total / PAGE_SIZE);
 
   const columns = [
     {
@@ -186,7 +195,7 @@ export default function RequestsPage() {
         <Button
           variant="outline"
           onClick={() => {
-            setPage(0);
+            setPage(1);
             void refetch();
           }}
           disabled={isLoading}
@@ -200,12 +209,12 @@ export default function RequestsPage() {
         {[
           { label: "Total Requests", value: totalRequests },
           {
-            label: "Success Rate",
-            value: totalRequests > 0 ? `${successRate}%` : "--",
+            label: "Success Rate (this page)",
+            value: pageLogs.length > 0 ? `${successRate}%` : "--",
           },
           {
-            label: "Avg Latency",
-            value: totalRequests > 0 ? `${averageLatency} ms` : "--",
+            label: "Avg Latency (this page)",
+            value: pageLogs.length > 0 ? `${averageLatency} ms` : "--",
           },
         ].map((card) => (
           <Card key={card.label} className="border-memBorder-primary">
@@ -229,7 +238,7 @@ export default function RequestsPage() {
 
       {isLoading ? (
         <TableSkeleton rows={6} columns={6} />
-      ) : logs.length === 0 ? (
+      ) : pageLogs.length === 0 && !isLoading ? (
         <EmptyState
           title="No request logs yet"
           description="Requests will appear here once your instance receives traffic."
@@ -239,30 +248,34 @@ export default function RequestsPage() {
         <>
           <Card className="border-memBorder-primary overflow-hidden">
             <DataTable
-              data={logs.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)}
+              data={pageLogs}
               columns={columns}
               getRowKey={(row) => row.id}
             />
           </Card>
-          {logs.length > PAGE_SIZE && (
+          {totalPages > 1 && (
             <div className="flex items-center justify-between text-sm text-onSurface-default-tertiary">
               <span>
-                {page * PAGE_SIZE + 1}–
-                {Math.min((page + 1) * PAGE_SIZE, logs.length)} of {logs.length}
+                Page {page} of {totalPages}
+                {total > 0 && (
+                  <span className="ml-1">
+                    ({total} total)
+                  </span>
+                )}
               </span>
               <div className="flex gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={page === 0}
-                  onClick={() => setPage((p) => p - 1)}
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
                   Previous
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={(page + 1) * PAGE_SIZE >= logs.length}
+                  disabled={page >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
                 >
                   Next

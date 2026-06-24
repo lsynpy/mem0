@@ -2,6 +2,9 @@ FROM node:20-alpine AS base
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
+# Use Chinese npm mirror for faster downloads
+ENV npm_config_registry=https://registry.npmmirror.com/
+
 # Dependencies
 FROM base AS deps
 COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./

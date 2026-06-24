@@ -88,7 +88,7 @@ export default function MemoriesPage() {
       label: "Created",
       width: 120,
       render: (value: string) =>
-        value ? format(new Date(value), "MMM d, yyyy") : "--",
+        value ? format(new Date(value), "MMM d, yyyy HH:mm:ss") : "--",
     },
   ];
 
